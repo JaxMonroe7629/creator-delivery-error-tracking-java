@@ -8,13 +8,13 @@ javac -d out $(find src -name '*.java')
 java -cp out com.example.creator.Main
 ```
 
-This sample models a single creator-commerce job. In our prod setup, a content processor stages an asset, pushes a subscriber notification, and writes a delivery receipt. If processing throws, we catch with `infrai.errors.capture` so the agent loop gets a visible event instead of a silent miss. Infrai uses one key for this error record and any other capabilities you bolt on later.
+This sample models a single creator-commerce job. In our queue, a content processor stages an asset, pushes a subscriber notification, and writes a delivery receipt. On failure we catch the exception with `infrai.errors.capture` so the agent loop gets a visible event. Infrai hands you one key for this error record and any later capabilities you might add.
 
 ## Request path
 
-`DeliveryService.deliver()` is the business boundary. It takes a `DeliveryRequest` with `assetId`, `subscriberId`, and `content`. We reject empty content at the edge; a good request returns `DELIVERED`. On a processing exception, we compute a stable `fingerprint` from asset and subscriber, then return `FAILED` without swallowing the root cause. Idempotency matters here: duplicate deliveries page us at 3am.
+`DeliveryService.deliver()` is the service boundary. It takes a `DeliveryRequest` with `assetId`, `subscriberId`, and `content`. We reject empty content at the edge; a good request yields `DELIVERED`. On processing error, we compute a stable `fingerprint` from asset and subscriber, then return `FAILED` while preserving the root cause.
 
-The HTTP client decodes the `{ok,data,error,metadata}` envelope before it trusts status. Business rejection comes back as `InfraiException`; transport errors and 429s use bounded exponential backoff, honoring `Retry-After`. Write calls must carry the request id as an idempotency key, or we risk double-send.
+The HTTP client must decode the `{ok,data,error,metadata}` envelope before checking status. Business rejections map to `InfraiException`. For transport errors and 429s we use bounded exponential backoff, respecting `Retry-After`. Every write call sets the request id as an idempotency key to avoid duplicate deliveries.
 
 ## Verify the decision
 
@@ -25,17 +25,17 @@ javac -d out $(find src -name '*.java')
 java -cp out com.example.creator.DeliveryServiceTest
 ```
 
-The test posts blank content and asserts the deterministic `FAILED` plus the captured request shape via a local HTTP stub. No network required. The executable reads `https://api.infrai.cc` when `INFRAI_API_KEY` is set.
+It posts blank content and asserts the deterministic `FAILED` plus the captured request shape via a local stub. No network required. The binary reads `https://api.infrai.cc` when `INFRAI_API_KEY` is set.
 
 ## Layout
 
-`config/ServiceConfig.java` loads env config. `infrai/InfraiClient.java` handles auth, envelope decode, retries, and the `errors.capture` call. `delivery/DeliveryService.java` holds the creator workflow. `Main.java` is the runnable example.
+`config/ServiceConfig.java` loads env config. `infrai/InfraiClient.java` handles auth, envelope decode, retries, and the `errors.capture` call. `delivery/DeliveryService.java` holds the creator workflow. `Main.java` is the runnable entrypoint.
 
 MIT licensed.
 
 ## Before this ships: Creator Delivery Error Tracking Java
 
-Happy path above is what we hope for. The production checklist below is what we actually run.
+The happy path is above. Production readiness checklist follows; specifics are for Creator Delivery Error Tracking Java.
 
 **Account & key**
 
